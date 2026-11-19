@@ -3,10 +3,11 @@ from src.data_loader import (
     load_excel,
     extract_main_dataset,
     analyze_distribution,
-    analyze_class_thresholds
+    analyze_class_thresholds,
 )
 
 from src.visualization import visualize_distribution
+from src.preprocessing import create_target_label
 
 
 def main():
@@ -24,6 +25,7 @@ def main():
     # Analisis kandidat batas kelas.
     analyze_class_thresholds(dataset)
 
+    dataset = create_target_label(dataset)
 
 if __name__ == "__main__":
     main()

@@ -2,7 +2,6 @@
 from pathlib import Path
 import pandas as pd
 
-
 # Menentukan direktori utama project ML
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -289,3 +288,5 @@ def analyze_class_thresholds(dataset):
         print(
             f"{name}: {percentage:.2f}%"
         )
+
+
