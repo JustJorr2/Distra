@@ -7,7 +7,7 @@ from src.data_loader import (
 )
 
 from src.visualization import visualize_distribution
-from src.preprocessing import create_target_label
+from src.preprocessing import (create_target_label, validate_dataset, prepare_features_target)
 
 
 def main():
@@ -26,6 +26,10 @@ def main():
     analyze_class_thresholds(dataset)
 
     dataset = create_target_label(dataset)
+
+    validate_dataset(dataset)
+
+    X, y = prepare_features_target(dataset)
 
 if __name__ == "__main__":
     main()
