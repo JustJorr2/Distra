@@ -1,3 +1,4 @@
+from sklearn.preprocessing import OneHotEncoder
 import pandas as pd
 
 
@@ -149,3 +150,56 @@ def prepare_features_target(dataset):
     print(y.value_counts())
 
     return X, y
+
+def encode_features(dataset):
+    print("\n" + "=" * 60)
+    print("ENCODING FITUR")
+    print("=" * 60)
+
+    # Memisahkan fitur dan target
+    X = dataset[["Kecamatan", "Tahun", "Jenis_Bencana"]].copy()
+    y = dataset["Dampak"].copy()
+
+    # Encoding fitur kategorikal
+    encoder = OneHotEncoder(
+        sparse_output=False,
+        handle_unknown="ignore"
+    )
+
+    categorical_features = X[["Kecamatan", "Jenis_Bencana"]]
+
+    encoded_data = encoder.fit_transform(categorical_features)
+
+    # Mendapatkan nama fitur hasil encoding
+    encoded_columns = encoder.get_feature_names_out(
+        ["Kecamatan", "Jenis_Bencana"]
+    )
+
+    encoded_df = pd.DataFrame(
+        encoded_data,
+        columns=encoded_columns,
+        index=X.index
+    )
+
+    # Memasukkan kembali fitur Tahun
+    encoded_df["Tahun"] = X["Tahun"]
+
+    print("\nFitur sebelum encoding:")
+    print(X.head())
+
+    print("\nFitur setelah encoding:")
+    print(encoded_df.head())
+
+    print("\nNama seluruh fitur:")
+    print(encoded_df.columns.tolist())
+
+    print("\nUkuran fitur hasil encoding:")
+    print(encoded_df.shape)
+
+    print("\nUkuran target:")
+    print(y.shape)
+
+    print("\nDistribusi target:")
+    print(y.value_counts())
+
+    return encoded_df, y, encoder
