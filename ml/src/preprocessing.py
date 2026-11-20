@@ -151,55 +151,60 @@ def prepare_features_target(dataset):
 
     return X, y
 
-def encode_features(dataset):
+def encode_features(X_train, X_test):
+
     print("\n" + "=" * 60)
     print("ENCODING FITUR")
     print("=" * 60)
 
-    # Memisahkan fitur dan target
-    X = dataset[["Kecamatan", "Tahun", "Jenis_Bencana"]].copy()
-    y = dataset["Dampak"].copy()
+    categorical_columns = ["Kecamatan", "Jenis_Bencana"]
 
-    # Encoding fitur kategorikal
+    # Encoder hanya mempelajari kategori dari data training
     encoder = OneHotEncoder(
         sparse_output=False,
         handle_unknown="ignore"
     )
 
-    categorical_features = X[["Kecamatan", "Jenis_Bencana"]]
+    # Fit dan transform data training
+    train_encoded = encoder.fit_transform(
+        X_train[categorical_columns]
+    )
 
-    encoded_data = encoder.fit_transform(categorical_features)
+    # Transform data testing menggunakan encoder training
+    test_encoded = encoder.transform(
+        X_test[categorical_columns]
+    )
 
-    # Mendapatkan nama fitur hasil encoding
+    # Nama fitur hasil encoding
     encoded_columns = encoder.get_feature_names_out(
-        ["Kecamatan", "Jenis_Bencana"]
+        categorical_columns
     )
 
-    encoded_df = pd.DataFrame(
-        encoded_data,
+    # Membuat DataFrame training
+    X_train_encoded = pd.DataFrame(
+        train_encoded,
         columns=encoded_columns,
-        index=X.index
+        index=X_train.index
     )
 
-    # Memasukkan kembali fitur Tahun
-    encoded_df["Tahun"] = X["Tahun"]
+    # Membuat DataFrame testing
+    X_test_encoded = pd.DataFrame(
+        test_encoded,
+        columns=encoded_columns,
+        index=X_test.index
+    )
 
-    print("\nFitur sebelum encoding:")
-    print(X.head())
+    # Menambahkan fitur Tahun yang bersifat numerik
+    X_train_encoded["Tahun"] = X_train["Tahun"]
+    X_test_encoded["Tahun"] = X_test["Tahun"]
 
-    print("\nFitur setelah encoding:")
-    print(encoded_df.head())
+    print("\nUkuran data training setelah encoding:")
+    print(X_train_encoded.shape)
 
-    print("\nNama seluruh fitur:")
-    print(encoded_df.columns.tolist())
+    print("\nUkuran data testing setelah encoding:")
+    print(X_test_encoded.shape)
 
-    print("\nUkuran fitur hasil encoding:")
-    print(encoded_df.shape)
+    print("\nNama fitur:")
+    print(X_train_encoded.columns.tolist())
 
-    print("\nUkuran target:")
-    print(y.shape)
-
-    print("\nDistribusi target:")
-    print(y.value_counts())
-
-    return encoded_df, y, encoder
+    return X_train_encoded, X_test_encoded, encoder
