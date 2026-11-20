@@ -1,4 +1,6 @@
 
+from sklearn.ensemble import RandomForestClassifier
+
 from src.data_loader import (
     load_excel,
     extract_main_dataset,
@@ -43,10 +45,10 @@ def main():
 
     validate_dataset(dataset)
 
-# Pemisahan fitur dan target
+    # Pemisahan fitur dan target
     X, y = prepare_features_target(dataset)
 
-    # Pembagian data training dan testing
+    # Pembagian training dan testing
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -55,37 +57,28 @@ def main():
         stratify=y
     )
 
-    print("\n" + "=" * 60)
-    print("PEMBAGIAN DATA TRAINING DAN TESTING")
-    print("=" * 60)
-
-    print(f"Jumlah data training : {len(X_train)}")
-    print(f"Jumlah data testing  : {len(X_test)}")
-
-    print("\nDistribusi target training:")
-    print(y_train.value_counts())
-
-    print("\nDistribusi target testing:")
-    print(y_test.value_counts())
-
-    # Encoding fitur setelah pembagian data
+    # Encoding
     X_train, X_test, encoder = encode_features(
         X_train,
         X_test
     )
 
     print("\n" + "=" * 60)
-    print("PEMBAGIAN DATA TRAINING DAN TESTING")
+    print("PELATIHAN MODEL RANDOM FOREST")
     print("=" * 60)
 
-    print(f"Jumlah data training : {len(X_train)}")
-    print(f"Jumlah data testing  : {len(X_test)}")
+    model = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42,
+        class_weight="balanced"
+    )
 
-    print("\nDistribusi target training:")
-    print(y_train.value_counts())
+    model.fit(X_train, y_train)
 
-    print("\nDistribusi target testing:")
-    print(y_test.value_counts())
+    print("\nModel berhasil dilatih.")
+    print(f"Jumlah decision tree : {model.n_estimators}")
+    print(f"Jumlah fitur        : {model.n_features_in_}")
+    print(f"Jumlah data training: {len(X_train)}")
 
 if __name__ == "__main__":
     main()
