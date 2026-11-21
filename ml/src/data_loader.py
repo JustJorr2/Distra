@@ -189,8 +189,10 @@ def analyze_distribution(dataset):
             "max",
             "mean",
             "median",
-            "std"
+            "std",
+            "sum"
         ])
+        .sort_values("mean", ascending=False)
     )
 
     print(disaster_stats.to_string())
@@ -208,7 +210,8 @@ def analyze_distribution(dataset):
             "min",
             "max",
             "mean",
-            "median"
+            "median",
+            "sum"
         ])
     )
 

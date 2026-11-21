@@ -1,11 +1,24 @@
+from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
-import pandas as pd
+
+from src.config import (
+    CATEGORICAL_FEATURES,
+    EXPECTED_OBSERVATIONS,
+    FEATURE_COLUMNS,
+    NUMERICAL_FEATURES,
+    TARGET_COLUMN,
+)
+from src.utils import print_section
 
 
 def classify_impact(value):
     """
-    Mengklasifikasikan dampak bencana berdasarkan
-    jumlah desa terdampak.
+    Mengklasifikasikan dampak bencana berdasarkan jumlah desa terdampak.
+
+    Batas kelas (tetap):
+    - Rendah : 0-1 desa
+    - Sedang : 2-3 desa
+    - Tinggi : >= 4 desa
     """
 
     if value <= 1:
@@ -20,77 +33,64 @@ def classify_impact(value):
 
 def create_target_label(dataset):
     """
-    Membuat kolom target Dampak berdasarkan
-    metode Quantile yang telah ditetapkan.
+    Membuat kolom target Dampak berdasarkan batas kelas tetap
+    (lihat classify_impact). Batas ditetapkan dari analisis kandidat
+    kuantil nilai positif (lihat analyze_class_thresholds).
     """
 
     dataset = dataset.copy()
 
-    dataset["Dampak"] = dataset["Jumlah_Desa_Terdampak"].apply(
+    dataset[TARGET_COLUMN] = dataset["Jumlah_Desa_Terdampak"].apply(
         classify_impact
     )
 
-    print("\n" + "=" * 60)
-    print("HASIL PEMBENTUKAN LABEL DAMPAK")
-    print("=" * 60)
+    print_section("HASIL PEMBENTUKAN LABEL DAMPAK")
 
     print("\nDistribusi kelas:")
-    print(dataset["Dampak"].value_counts())
+    print(dataset[TARGET_COLUMN].value_counts())
 
     print("\nPersentase kelas:")
     print(
-        dataset["Dampak"].value_counts(normalize=True)
+        dataset[TARGET_COLUMN].value_counts(normalize=True)
         .mul(100)
         .round(2)
     )
 
     return dataset
 
-def validate_dataset(dataset):
-    print("\n" + "=" * 60)
-    print("VALIDASI DATASET HASIL PREPROCESSING")
-    print("=" * 60)
 
-    # 1. Informasi ukuran dataset
+def validate_dataset(dataset):
+    print_section("VALIDASI DATASET HASIL PREPROCESSING")
+
+    # 1. Ukuran dataset
     print("\nUkuran dataset:")
     print(f"Jumlah baris : {dataset.shape[0]}")
-    print(f"Jumlah kolom  : {dataset.shape[1]}")
+    print(f"Jumlah kolom : {dataset.shape[1]}")
 
-    # 2. Pemeriksaan missing value
+    # 2. Missing value
     print("\nMissing values:")
     print(dataset.isnull().sum())
 
-    # 3. Pemeriksaan data duplikat
+    # 3. Data duplikat (seluruh kolom dan kunci observasi)
     duplicate_count = dataset.duplicated().sum()
+    duplicate_key_count = dataset.duplicated(subset=FEATURE_COLUMNS).sum()
 
     print("\nData duplikat:")
-    print(duplicate_count)
+    print(f"Seluruh kolom           : {duplicate_count}")
+    print(f"Kecamatan-Tahun-Bencana : {duplicate_key_count}")
 
-    # 4. Distribusi target
-    print("\nDistribusi target:")
-    print(dataset["Dampak"].value_counts())
-
-    # 5. Persentase target
-    print("\nPersentase target:")
-    print(
-        dataset["Dampak"]
-        .value_counts(normalize=True)
-        .mul(100)
-        .round(2)
-    )
-
-    # 6. Pemeriksaan label berdasarkan jumlah desa
+    # 4. Kesesuaian label dengan jumlah desa
     print("\nValidasi label berdasarkan jumlah desa:")
     print(
-        dataset.groupby("Dampak")["Jumlah_Desa_Terdampak"]
+        dataset.groupby(TARGET_COLUMN)["Jumlah_Desa_Terdampak"]
         .agg(["min", "max", "count"])
     )
 
-    # 7. Informasi tipe data
+    # 5. Tipe data
     print("\nTipe data:")
     print(dataset.dtypes)
 
-    # 8. Validasi kondisi dataset
+    # 6. Status validasi
     print("\nStatus validasi:")
 
     if dataset.isnull().sum().sum() == 0:
@@ -98,38 +98,33 @@ def validate_dataset(dataset):
     else:
         print("Terdapat missing value.")
 
-    if duplicate_count == 0:
+    if duplicate_count == 0 and duplicate_key_count == 0:
         print("Tidak terdapat data duplikat.")
     else:
-        print(f"Terdapat {duplicate_count} data duplikat.")
+        print(
+            f"Terdapat data duplikat "
+            f"(seluruh kolom: {duplicate_count}, "
+            f"kunci observasi: {duplicate_key_count})."
+        )
 
-    if len(dataset) == 300:
-        print("Jumlah observasi sesuai: 300 data.")
+    if len(dataset) == EXPECTED_OBSERVATIONS:
+        print(f"Jumlah observasi sesuai: {EXPECTED_OBSERVATIONS} data.")
     else:
         print(f"Jumlah observasi tidak sesuai: {len(dataset)}.")
 
     return dataset
 
+
 def prepare_features_target(dataset):
     """
-    Memisahkan fitur (X) dan target (y)
-    untuk pemodelan Random Forest.
+    Memisahkan fitur (X) dan target (y) untuk pemodelan Random Forest.
+    Jumlah_Desa_Terdampak tidak termasuk fitur (mencegah data leakage).
     """
 
-    feature_columns = [
-        "Kecamatan",
-        "Tahun",
-        "Jenis_Bencana"
-    ]
+    X = dataset[FEATURE_COLUMNS].copy()
+    y = dataset[TARGET_COLUMN].copy()
 
-    target_column = "Dampak"
-
-    X = dataset[feature_columns].copy()
-    y = dataset[target_column].copy()
-
-    print("\n" + "=" * 60)
-    print("PEMISAHAN FITUR DAN TARGET")
-    print("=" * 60)
+    print_section("PEMISAHAN FITUR DAN TARGET")
 
     print("\nFitur X:")
     print(X.head())
@@ -146,65 +141,32 @@ def prepare_features_target(dataset):
     print("\nKolom fitur:")
     print(X.columns.tolist())
 
-    print("\nDistribusi target:")
-    print(y.value_counts())
-
     return X, y
 
-def encode_features(X_train, X_test):
 
-    print("\n" + "=" * 60)
-    print("ENCODING FITUR")
-    print("=" * 60)
+def build_preprocessor():
+    """
+    Preprocessor tunggal untuk seluruh evaluasi:
+    One-Hot Encoding untuk fitur kategorik, Tahun dipertahankan numerik.
 
-    categorical_columns = ["Kecamatan", "Jenis_Bencana"]
+    - sparse_threshold=0      : keluaran dense (setara encode_features lama).
+    - verbose_feature_names_out=False : nama fitur tanpa prefix
+      (Kecamatan_..., Jenis_Bencana_..., Tahun) untuk feature importance.
+    """
 
-    # Encoder hanya mempelajari kategori dari data training
-    encoder = OneHotEncoder(
-        sparse_output=False,
-        handle_unknown="ignore"
+    return ColumnTransformer(
+        transformers=[
+            (
+                "categorical",
+                OneHotEncoder(handle_unknown="ignore"),
+                CATEGORICAL_FEATURES,
+            ),
+            (
+                "numerical",
+                "passthrough",
+                NUMERICAL_FEATURES,
+            ),
+        ],
+        sparse_threshold=0,
+        verbose_feature_names_out=False,
     )
-
-    # Fit dan transform data training
-    train_encoded = encoder.fit_transform(
-        X_train[categorical_columns]
-    )
-
-    # Transform data testing menggunakan encoder training
-    test_encoded = encoder.transform(
-        X_test[categorical_columns]
-    )
-
-    # Nama fitur hasil encoding
-    encoded_columns = encoder.get_feature_names_out(
-        categorical_columns
-    )
-
-    # Membuat DataFrame training
-    X_train_encoded = pd.DataFrame(
-        train_encoded,
-        columns=encoded_columns,
-        index=X_train.index
-    )
-
-    # Membuat DataFrame testing
-    X_test_encoded = pd.DataFrame(
-        test_encoded,
-        columns=encoded_columns,
-        index=X_test.index
-    )
-
-    # Menambahkan fitur Tahun yang bersifat numerik
-    X_train_encoded["Tahun"] = X_train["Tahun"]
-    X_test_encoded["Tahun"] = X_test["Tahun"]
-
-    print("\nUkuran data training setelah encoding:")
-    print(X_train_encoded.shape)
-
-    print("\nUkuran data testing setelah encoding:")
-    print(X_test_encoded.shape)
-
-    print("\nNama fitur:")
-    print(X_train_encoded.columns.tolist())
-
-    return X_train_encoded, X_test_encoded, encoder
