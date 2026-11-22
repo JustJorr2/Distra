@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:llama_flutter_android/llama_flutter_android.dart';
+import '../config/personalization.dart';
 
 class QwenService {
   final LlamaController _controller = LlamaController();
@@ -14,12 +15,16 @@ class QwenService {
 
   // Memilih file GGUF
   Future<String?> pickModelFile() async {
-    final file = await FilePicker.pickFile(
+    final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['gguf'],
     );
 
-    return file?.path;
+    if (files.isEmpty) {
+      return null;
+    }
+
+    return files.first.path;
   }
 
   // Memuat model ke memori
@@ -58,7 +63,7 @@ class QwenService {
       messages: [
         ChatMessage(
           role: 'system',
-          content: 'You are a helpful AI assistant for disaster mitigation.',
+          content: Personalization.systemPrompt,
         ),
         ChatMessage(
           role: 'user',
