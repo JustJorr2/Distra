@@ -1,0 +1,20 @@
+{
+    "model_name": "Random Forest",
+    "model_type": "classification",
+    "training_samples": 300,
+    "features": [
+        "Kecamatan",
+        "Tahun",
+        "Jenis_Bencana"
+    ],
+    "target": "Dampak",
+    "class_labels": [
+        "Dampak Rendah",
+        "Dampak Sedang",
+        "Dampak Tinggi"
+    ],
+    "random_state": 42,
+    "n_estimators": 100,
+    "class_weight": "balanced",
+    "sklearn_version": "1.9.1"
+}

@@ -26,7 +26,7 @@ def analyze_impact_patterns(dataset):
     print("\nRata-rata desa terdampak pada setiap kecamatan dan jenis bencana:")
     print(impact_pattern.round(2))
 
-    class_pattern = dataset.pivot_table(
+    high_impact_pattern = dataset.pivot_table(
         index="Kecamatan",
         columns="Jenis_Bencana",
         values="Dampak",
@@ -34,9 +34,9 @@ def analyze_impact_patterns(dataset):
         fill_value=0
     )
 
-    print("\nJumlah kelas Dampak Tinggi pada setiap kecamatan dan jenis bencana:")
-    print(class_pattern)
-
+    print("\nJumlah kategori Dampak Tinggi pada setiap kecamatan dan jenis bencana:")
+    print(high_impact_pattern)
+    
     total_pattern = dataset.pivot_table(
         index="Kecamatan",
         columns="Jenis_Bencana",

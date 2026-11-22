@@ -172,10 +172,17 @@ def run_temporal_validation(X, y):
 def _feature_group(feature_name):
     """Kelompok asal fitur hasil encoding. Error jika nama tidak dikenali."""
 
+    # Menghapus prefix ColumnTransformer, misalnya:
+    # categorical__Kecamatan_Kakas -> Kecamatan_Kakas
+    # numerical__Tahun -> Tahun
+    feature_name = feature_name.split("__", maxsplit=1)[-1]
+
     if feature_name.startswith("Kecamatan_"):
         return "Kecamatan"
+
     if feature_name.startswith("Jenis_Bencana_"):
         return "Jenis Bencana"
+
     if feature_name == "Tahun":
         return "Tahun"
 
