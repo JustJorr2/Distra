@@ -1,10 +1,12 @@
 
 import 'dart:async';
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:llama_flutter_android/llama_flutter_android.dart';
-import '../config/personalization.dart';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../config/personalization.dart';
 
 class QwenService {
   final LlamaController _controller = LlamaController();
@@ -12,14 +14,11 @@ class QwenService {
   bool _isModelLoaded = false;
   String? _modelPath;
 
-  // Menyimpan riwayat percakapan selama sesi aktif.
   final List<ChatMessage> _conversationHistory = [];
 
   bool get isModelLoaded => _isModelLoaded;
   String? get modelPath => _modelPath;
-
   int get conversationLength => _conversationHistory.length;
-
 
   // Memilih file GGUF.
   Future<String?> pickModelFile() async {
@@ -28,9 +27,7 @@ class QwenService {
       allowedExtensions: ['gguf'],
     );
 
-    if (files.isEmpty) {
-      return null;
-    }
+    if (files.isEmpty) return null;
 
     return files.first.path;
   }
@@ -40,7 +37,6 @@ class QwenService {
     final prefs = await SharedPreferences.getInstance();
     final savedPath = prefs.getString('qwen_model_path');
 
-    // Periksa apakah model masih berada di native memory.
     final nativeLoaded = await _controller.isModelLoaded();
 
     if (nativeLoaded) {
@@ -49,7 +45,6 @@ class QwenService {
       return true;
     }
 
-    // Jika tidak ada model di memory, gunakan path tersimpan.
     if (savedPath == null || !await File(savedPath).exists()) {
       return false;
     }
@@ -63,7 +58,7 @@ class QwenService {
     await _controller.loadModel(
       modelPath: path,
       threads: 4,
-      contextSize: 2048,
+      contextSize: 4096,
       gpuLayers: 0,
     );
 
@@ -80,13 +75,104 @@ class QwenService {
   Future<String?> selectAndLoadModel() async {
     final path = await pickModelFile();
 
-    if (path == null) {
-      return null;
-    }
+    if (path == null) return null;
 
     await loadModel(path);
 
     return path;
+  }
+
+  // Mencari panjang akhiran yang mungkin merupakan
+  // bagian awal dari tag think.
+  int _longestSuffixPrefix(String text, String marker) {
+    final maxLength = text.length < marker.length - 1
+        ? text.length
+        : marker.length - 1;
+
+    for (int length = maxLength; length > 0; length--) {
+      if (text.endsWith(marker.substring(0, length))) {
+        return length;
+      }
+    }
+
+    return 0;
+  }
+
+  // Menyaring blok <think>...</think> selama streaming.
+  Stream<String> _filterThinkTags(Stream<String> source) async* {
+    const startTag = '<think>';
+    const endTag = '</think>';
+
+    String pending = '';
+    bool insideThink = false;
+
+    await for (final token in source) {
+      pending += token;
+
+      while (pending.isNotEmpty) {
+        final lowerPending = pending.toLowerCase();
+
+        if (insideThink) {
+          final endIndex = lowerPending.indexOf(endTag);
+
+          if (endIndex != -1) {
+            pending = pending.substring(endIndex + endTag.length);
+            insideThink = false;
+            continue;
+          }
+
+          // Pertahankan kemungkinan potongan tag penutup.
+          final keepLength = _longestSuffixPrefix(
+            lowerPending,
+            endTag,
+          );
+
+          pending = keepLength == 0
+              ? ''
+              : pending.substring(pending.length - keepLength);
+
+          break;
+        }
+
+        final startIndex = lowerPending.indexOf(startTag);
+
+        if (startIndex != -1) {
+          final visibleText = pending.substring(0, startIndex);
+
+          if (visibleText.isNotEmpty) {
+            yield visibleText;
+          }
+
+          pending = pending.substring(startIndex + startTag.length);
+          insideThink = true;
+          continue;
+        }
+
+        // Jangan keluarkan karakter yang mungkin merupakan
+        // awal tag <think> yang terpecah antar-token.
+        final keepLength = _longestSuffixPrefix(
+          lowerPending,
+          startTag,
+        );
+
+        final safeLength = pending.length - keepLength;
+
+        if (safeLength > 0) {
+          yield pending.substring(0, safeLength);
+        }
+
+        pending = keepLength == 0
+            ? ''
+            : pending.substring(safeLength);
+
+        break;
+      }
+    }
+
+    // Keluarkan sisa teks jika bukan bagian dari blok think.
+    if (!insideThink && pending.isNotEmpty) {
+      yield pending;
+    }
   }
 
   // Menghasilkan respons dengan konteks percakapan.
@@ -105,32 +191,34 @@ class QwenService {
     final responseBuffer = StringBuffer();
 
     try {
-      await for (final token in _controller.generateChat(
+      final rawStream = _controller.generateChat(
         messages: [
           ChatMessage(
             role: 'system',
             content: '''
-          ${Personalization.systemPrompt}
+${Personalization.systemPrompt}
 
-          /no_think
+/no_think
 
-          IMPORTANT:
-          - Do not generate or display a <think> section.
-          - Respond directly with the final answer.
-          - Do not include internal reasoning in the response.
-          ''',
+IMPORTANT:
+- Do not generate or display a <think> section.
+- Respond directly with the final answer.
+- Do not include internal reasoning in the response.
+''',
           ),
           ..._conversationHistory,
         ],
         template: 'chatml',
         maxTokens: 512,
         temperature: 0.7,
-      )) {
+      );
+
+      await for (final token in _filterThinkTags(rawStream)) {
         responseBuffer.write(token);
         yield token;
       }
 
-      final response = responseBuffer.toString();
+      final response = responseBuffer.toString().trim();
 
       if (response.isNotEmpty) {
         _conversationHistory.add(
@@ -141,7 +229,6 @@ class QwenService {
         );
       }
     } catch (_) {
-      // Menghapus pesan pengguna jika generasi gagal.
       if (_conversationHistory.isNotEmpty &&
           identical(_conversationHistory.last, userMessage)) {
         _conversationHistory.removeLast();
