@@ -1,5 +1,7 @@
+
 import 'package:material_ui/material_ui.dart';
-import 'screens/ai_analysis_screen.dart';
+
+import 'screens/main_screen.dart';
 
 void main() {
   runApp(const MainApp());
@@ -19,7 +21,7 @@ class MainApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const AIAnalysisScreen(),
+      home: const MainScreen(),
     );
   }
 }
