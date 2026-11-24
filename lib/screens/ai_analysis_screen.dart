@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 import '../services/qwen_service.dart';
+import 'package:flutter/services.dart';
 
 class AIAnalysisScreen extends StatefulWidget {
   const AIAnalysisScreen({super.key});
@@ -20,6 +21,57 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
 
   bool _isLoadingModel = false;
   bool _isGenerating = false;
+
+
+  Future<void> _copyResponse() async {
+    if (_response.trim().isEmpty) {
+      return;
+    }
+
+    await Clipboard.setData(
+      ClipboardData(text: _response),
+    );
+
+    if (!mounted) return;
+
+    _showMessage('Response copied to clipboard.');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreModel();
+  }
+
+  Future<void> _restoreModel() async {
+    setState(() {
+      _isLoadingModel = true;
+    });
+
+    try {
+      final restored = await _qwenService.restoreModel();
+
+      if (!mounted) return;
+
+      if (restored) {
+        setState(() {
+          _modelName = _qwenService.modelPath
+                  ?.split(RegExp(r'[/\\]'))
+                  .last ??
+              'Previously loaded model';
+        });
+      }
+    } catch (e) {
+      _showMessage('Failed to restore model: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingModel = false;
+        });
+      }
+    }
+  }
+
 
   Future<void> _selectAndLoadModel() async {
     setState(() {
@@ -205,13 +257,27 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'AI Response',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Text(
+                  'AI Response',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                IconButton(
+                  onPressed: _response.trim().isNotEmpty
+                      ? _copyResponse
+                      : null,
+                  tooltip: 'Copy response',
+                  icon: const Icon(Icons.copy),
+                ),
+              ],
             ),
+            const SizedBox(height: 8),
             const SizedBox(height: 8),
             Expanded(
               child: Container(
