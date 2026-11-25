@@ -255,11 +255,36 @@ class QwenService {
     }
   }
 
+  // Mengganti seluruh konteks percakapan Qwen.
+  void replaceConversation(List<Map<String, String>> messages) {
+    _conversationHistory.clear();
+
+    for (final message in messages) {
+      final role = message['role'];
+      final content = message['content'];
+
+      if (role == null || content == null || content.isEmpty) {
+        continue;
+      }
+
+      if (role != 'user' && role != 'assistant') {
+        continue;
+      }
+
+      _conversationHistory.add(
+        ChatMessage(
+          role: role,
+          content: content,
+        ),
+      );
+    }
+  }
 
   // Memulai percakapan baru.
   void clearConversation() {
     _conversationHistory.clear();
   }
+
 
   // Menghentikan generasi.
   Future<void> stopGeneration() async {

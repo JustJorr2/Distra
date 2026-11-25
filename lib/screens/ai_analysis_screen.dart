@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../services/qwen_service.dart';
+import '../services/chat_storage_service.dart';
 
 class AIAnalysisScreen extends StatefulWidget {
   const AIAnalysisScreen({super.key});
@@ -37,6 +38,30 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
     _restoreModel();
   }
 
+  // Mengubah daftar pesan menjadi format penyimpanan.
+  List<Map<String, String>> _conversationData() {
+    return _messages
+        .where((message) => message.content.trim().isNotEmpty)
+        .map(
+          (message) => {
+            'role': message.isUser ? 'user' : 'assistant',
+            'content': message.content,
+          },
+        )
+        .toList();
+  }
+
+  // Menyimpan percakapan ke penyimpanan lokal.
+  Future<void> _saveChat() async {
+    await ChatStorageService.saveMessages(_conversationData());
+  }
+
+  // Menyamakan riwayat Qwen dengan pesan yang tampil di layar.
+  void _syncQwenConversation() {
+    _qwenService.replaceConversation(_conversationData());
+  }
+
+
   // Memulihkan model yang sebelumnya digunakan.
   Future<void> _restoreModel() async {
     setState(() {
@@ -44,6 +69,25 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
     });
 
     try {
+      // Memulihkan percakapan yang tersimpan.
+      final savedMessages = await ChatStorageService.loadMessages();
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(
+            savedMessages.map(
+              (message) => _ChatMessage(
+                content: message['content'] ?? '',
+                isUser: message['role'] == 'user',
+              ),
+            ),
+          );
+      });
+
+      // Memulihkan model Qwen.
       final restored = await _qwenService.restoreModel();
 
       if (!mounted) return;
@@ -55,9 +99,11 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
                   .last ??
               'Previously loaded model';
         });
+
+        _syncQwenConversation();
       }
     } catch (e) {
-      _showMessage('Failed to restore model: $e');
+      _showMessage('Failed to restore conversation: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -88,6 +134,8 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
         _messages.clear();
       });
 
+      await ChatStorageService.clearMessages();
+
       _showMessage('Model loaded successfully.');
     } catch (e) {
       _showMessage('Failed to load model: $e');
@@ -101,8 +149,8 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
   }
 
   // Mengirim pesan pengguna.
-  Future<void> _sendMessage() async {
-    final prompt = _promptController.text.trim();
+  Future<void> _sendMessage({String? promptOverride}) async {
+    final prompt = (promptOverride ?? _promptController.text).trim();
 
     if (prompt.isEmpty || _isGenerating) return;
 
@@ -123,7 +171,6 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
         ),
       );
 
-      // Menyediakan bubble kosong untuk respons AI.
       _messages.add(
         _ChatMessage(
           content: '',
@@ -134,6 +181,9 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
       _isGenerating = true;
     });
 
+    // Simpan pertanyaan sebelum proses generasi.
+    unawaited(_saveChat());
+
     _scrollToBottom();
 
     try {
@@ -141,7 +191,7 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
           .generateResponse(prompt)
           .listen(
         (token) {
-          if (!mounted) return;
+          if (!mounted || assistantIndex >= _messages.length) return;
 
           setState(() {
             _messages[assistantIndex].content += token;
@@ -155,10 +205,14 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
           setState(() {
             _isGenerating = false;
 
-            if (_messages[assistantIndex].content.isEmpty) {
+            if (assistantIndex < _messages.length &&
+                _messages[assistantIndex].content.isEmpty) {
               _messages.removeAt(assistantIndex);
             }
           });
+
+          _syncQwenConversation();
+          unawaited(_saveChat());
 
           _showMessage('Generation error: $error');
         },
@@ -168,6 +222,9 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
           setState(() {
             _isGenerating = false;
           });
+
+          _syncQwenConversation();
+          unawaited(_saveChat());
 
           _scrollToBottom();
         },
@@ -184,9 +241,13 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
         }
       });
 
+      _syncQwenConversation();
+      unawaited(_saveChat());
+
       _showMessage('Error: $e');
     }
   }
+
 
   // Menghentikan generasi AI.
   Future<void> _stopGeneration() async {
@@ -198,10 +259,13 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
     setState(() {
       _isGenerating = false;
     });
+
+    _syncQwenConversation();
+    await _saveChat();
   }
 
   // Memulai percakapan baru.
-  void _startNewChat() {
+  Future<void> _startNewChat() async {
     if (_isGenerating) return;
 
     _qwenService.clearConversation();
@@ -210,6 +274,8 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
       _messages.clear();
       _promptController.clear();
     });
+
+    await ChatStorageService.clearMessages();
 
     _scrollToBottom();
   }
@@ -226,6 +292,95 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
 
     _showMessage('Response copied to clipboard.');
   }
+
+
+// Menghapus pesan beserta pasangan percakapannya.
+  Future<void> _deleteMessage(int index) async {
+    if (_isGenerating || index < 0 || index >= _messages.length) {
+      return;
+    }
+
+    final message = _messages[index];
+
+    int startIndex;
+    int endIndex;
+
+    if (message.isUser) {
+      startIndex = index;
+      endIndex = index + 1;
+
+      // Hapus jawaban AI yang mengikuti pertanyaan.
+      if (endIndex < _messages.length &&
+          !_messages[endIndex].isUser) {
+        endIndex++;
+      }
+    } else {
+      // Jika memilih jawaban AI, hapus pertanyaan pasangannya.
+      startIndex = index > 0 && _messages[index - 1].isUser
+          ? index - 1
+          : index;
+
+      endIndex = index + 1;
+    }
+
+    setState(() {
+      _messages.removeRange(startIndex, endIndex);
+    });
+
+    _syncQwenConversation();
+    await _saveChat();
+
+    if (!mounted) return;
+
+    _showMessage('Conversation deleted.');
+  }
+
+  // Mengedit pertanyaan dan menghasilkan ulang jawabannya.
+  Future<void> _editMessage(int index) async {
+    if (_isGenerating ||
+        index < 0 ||
+        index >= _messages.length ||
+        !_messages[index].isUser) {
+      return;
+    }
+
+    final editedPrompt = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return _EditMessageDialog(
+          initialText: _messages[index].content,
+        );
+      },
+    );
+
+    if (!mounted || editedPrompt == null) return;
+
+    final newPrompt = editedPrompt.trim();
+
+    if (newPrompt.isEmpty) {
+      _showMessage('Message cannot be empty.');
+      return;
+    }
+
+    if (newPrompt == _messages[index].content) {
+      return;
+    }
+
+    // Hapus pertanyaan lama dan pesan setelahnya.
+    setState(() {
+      _messages.removeRange(index, _messages.length);
+      _promptController.text = newPrompt;
+    });
+
+    _syncQwenConversation();
+    await _saveChat();
+
+    if (!mounted) return;
+
+    // Kirim kembali pertanyaan yang sudah diedit.
+    await _sendMessage(promptOverride: newPrompt);
+  }
+
 
   // Mengikuti pesan terbaru.
   void _scrollToBottom() {
@@ -355,107 +510,185 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
   }
 
   // Bubble pesan pengguna.
-  Widget _buildUserMessage(String content) {
+
+  Widget _buildUserMessage(int index) {
+    final content = _messages[index].content;
+
     return Align(
       alignment: Alignment.centerRight,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.78,
-        ),
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(16).copyWith(
-            bottomRight: const Radius.circular(4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.78,
+            ),
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(16).copyWith(
+                bottomRight: const Radius.circular(4),
+              ),
+            ),
+            child: SelectableText(content),
           ),
-        ),
-        child: SelectableText(content),
+          _buildMessageActions(
+            index: index,
+            content: content,
+            isUser: true,
+          ),
+        ],
       ),
     );
   }
 
+
+  // Tombol aksi yang ditampilkan di bawah bubble.
+  Widget _buildMessageActions({
+    required int index,
+    required String content,
+    required bool isUser,
+  }) {
+    final canUseActions =
+        !_isGenerating && content.trim().isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(
+        left: 4,
+        right: 4,
+        top: 2,
+        bottom: 4,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: content.trim().isEmpty
+                ? null
+                : () => _copyMessage(content),
+            tooltip: 'Copy',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(
+              Icons.copy_outlined,
+              size: 18,
+            ),
+          ),
+
+          if (isUser)
+            IconButton(
+              onPressed: canUseActions
+                  ? () => _editMessage(index)
+                  : null,
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(
+                Icons.edit_outlined,
+                size: 18,
+              ),
+            ),
+
+          IconButton(
+            onPressed: canUseActions
+                ? () => _deleteMessage(index)
+                : null,
+            tooltip: 'Hapus',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(
+              Icons.delete_outline,
+              size: 18,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   // Bubble respons AI.
-  Widget _buildAIMessage(String content) {
+ 
+  Widget _buildAIMessage(int index) {
+    final content = _messages[index].content;
     final isEmpty = content.isEmpty;
 
     return Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.88,
-        ),
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16).copyWith(
-            bottomLeft: const Radius.circular(4),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.auto_awesome,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'Distra',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: isEmpty
-                      ? null
-                      : () => _copyMessage(content),
-                  tooltip: 'Copy response',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(
-                    Icons.copy,
-                    size: 17,
-                  ),
-                ),
-              ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.88,
             ),
-            if (isEmpty && _isGenerating)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(16).copyWith(
+                bottomLeft: const Radius.circular(4),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
+                    Icon(
+                      Icons.auto_awesome,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
-                    SizedBox(width: 10),
-                    Text(
-                      'Distra sedang mengetik...',
-                      style: TextStyle(color: Colors.grey),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Distra',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
-              )
-            else if (content.isNotEmpty)
-              MarkdownBody(
-                data: content,
-                selectable: true,
-              ),
-          ],
-        ),
+                if (isEmpty && _isGenerating)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'Distra sedang mengetik...',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (content.isNotEmpty)
+                  MarkdownBody(
+                    data: content,
+                    selectable: true,
+                  ),
+              ],
+            ),
+          ),
+          _buildMessageActions(
+            index: index,
+            content: content,
+            isUser: false,
+          ),
+        ],
       ),
     );
   }
+
 
   // Daftar seluruh pesan.
   Widget _buildMessageList() {
@@ -474,8 +707,8 @@ class _AIAnalysisScreenState extends State<AIAnalysisScreen> {
         final message = _messages[index];
 
         return message.isUser
-            ? _buildUserMessage(message.content)
-            : _buildAIMessage(message.content);
+            ? _buildUserMessage(index)
+            : _buildAIMessage(index);
       },
     );
   }
@@ -592,4 +825,72 @@ class _ChatMessage {
 
   String content;
   final bool isUser;
+}
+
+
+class _EditMessageDialog extends StatefulWidget {
+  const _EditMessageDialog({
+    required this.initialText,
+  });
+
+  final String initialText;
+
+  @override
+  State<_EditMessageDialog> createState() =>
+      _EditMessageDialogState();
+}
+
+class _EditMessageDialogState
+    extends State<_EditMessageDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = TextEditingController(
+      text: widget.initialText,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit message'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 5,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          hintText: 'Edit your question...',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context);
+          },
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(
+              context,
+              _controller.text.trim(),
+            );
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
