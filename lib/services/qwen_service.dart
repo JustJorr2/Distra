@@ -7,6 +7,7 @@ import 'package:llama_flutter_android/llama_flutter_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/personalization.dart';
+import 'qwen_background_manager.dart';
 
 class QwenService {
   final LlamaController _controller = LlamaController();
@@ -176,6 +177,7 @@ class QwenService {
   }
 
   // Menghasilkan respons dengan konteks percakapan.
+
   Stream<String> generateResponse(String prompt) async* {
     if (!_isModelLoaded) {
       throw StateError('Model Qwen belum dimuat.');
@@ -190,21 +192,27 @@ class QwenService {
 
     final responseBuffer = StringBuffer();
 
+    bool backgroundServiceStarted = false;
+
     try {
+      // Start Android Foreground Service.
+      await QwenBackgroundManager.startService();
+      backgroundServiceStarted = true;
+
       final rawStream = _controller.generateChat(
         messages: [
           ChatMessage(
             role: 'system',
             content: '''
-${Personalization.systemPrompt}
+              ${Personalization.systemPrompt}
 
-/no_think
+              /no_think
 
-IMPORTANT:
-- Do not generate or display a <think> section.
-- Respond directly with the final answer.
-- Do not include internal reasoning in the response.
-''',
+              IMPORTANT:
+              - Do not generate or display a <think> section.
+              - Respond directly with the final answer.
+              - Do not include internal reasoning in the response.
+              ''',
           ),
           ..._conversationHistory,
         ],
@@ -235,8 +243,18 @@ IMPORTANT:
       }
 
       rethrow;
+    } finally {
+      // Stop Foreground Service after generation.
+      if (backgroundServiceStarted) {
+        try {
+          await QwenBackgroundManager.stopService();
+        } catch (_) {
+          // Avoid overriding the original generation error.
+        }
+      }
     }
   }
+
 
   // Memulai percakapan baru.
   void clearConversation() {
